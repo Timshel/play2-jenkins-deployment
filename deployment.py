@@ -27,6 +27,7 @@ parser.read('deployment.conf')
 
 server = parser.get('jenkins', 'server')
 jobname = parser.get('jenkins', 'jobname')
+jobname_publish = parser.get('jenkins', 'jobname_publish')
 user = parser.get('jenkins',  'user')
 token = parser.get('jenkins', 'token')
 
@@ -35,7 +36,11 @@ poll_delay = parser.get('jenkins', 'poll_delay')
 play_path = parser.get('play', 'path')
 
 play_app_git = parser.get('application', 'git')
+play_app_git_publish = parser.get('application', 'git_publish')
+
 play_app_path = parser.get('application', 'path')
+play_app_path_publish = parser.get('application', 'path_publish')
+
 play_app_port = parser.get('application', 'port')
 play_app_apply_evolutions = parser.get('application', 'apply_evolutions')
 play_app_conf_file = parser.get('application', 'conf_file')
@@ -63,8 +68,28 @@ def main():
     #Loop until interruption or kill signals
     while True:
 
-        need = needDeployment(server, jobname, user, token)
+        need = needDeployment(server, jobname_publish, user, token, "LAST_PUBLISHED")
+        if (need.value):
+            print ""
+            print "\t ~ Publish of " + str(need.revision) + " ( Build " + str(need.number) + " ) "  + "start "
+            print ""
 
+            #go in the work directory
+            previous = os.getcwd()
+            os.chdir(env)
+
+            checkout(jobname_publish, play_app_git_publish, need.revision)
+            publish(jobname_publish, play_path, play_app_path_publish)
+
+            #go back in our current directory
+            os.chdir(previous)
+
+            updateLastDeployed("LAST_PUBLISHED", need.number,)
+            print ""
+            print "\t ~  " + str(need.revision) + " has been successfuly published !"
+            print ""
+
+        need = needDeployment(server, jobname, user, token, "LAST_DEPLOYED")
         if (need.value):
             print ""
             print "\t ~ Deployment of " + str(need.revision) + " ( Build " + str(need.number) + " ) "  + "start "
@@ -80,7 +105,7 @@ def main():
             #go back in our current directory
             os.chdir(previous)
 
-            updateLastDeployed(need.number)
+            updateLastDeployed("LAST_DEPLOYED", need.number)
             print ""
             print "\t ~  " + str(need.revision) + " has been successfuly deployed !"
             print ""
@@ -104,7 +129,7 @@ def main():
         time.sleep(int(poll_delay));
 
 
-def needDeployment(server, jobname, user, token):
+def needDeployment(server, jobname, user, token, fileName):
 
     result = collections.namedtuple('value', ['revision', 'number'])
     result.value = False
@@ -113,7 +138,7 @@ def needDeployment(server, jobname, user, token):
         jsonBuildStatus = getBuildStatus(server, jobname, user, token)
         buildNumber = getBuildNumber(jsonBuildStatus)
         buildRevision = getBuildRevision(jsonBuildStatus)
-        lastDeployed = getLastDeployed()
+        lastDeployed = getLastDeployed(fileName)
 
         result.revision = buildRevision
         result.number = buildNumber
@@ -161,7 +186,8 @@ def quit(signum, frame):
 
     # when we quit we set back the last deployed to 0
     # this allow us to restart gracefully
-    updateLastDeployed(0)
+    updateLastDeployed("LAST_PUBLISHED", 0)
+    updateLastDeployed("LAST_DEPLOYED", 0)
     print "\n\t -- Terminating --"
 
     sys.exit(0)
@@ -196,15 +222,15 @@ def getBuildRevision(buildStatusJson):
 
     raise Exception("\t ~ Error: Unable to get build revision from JSON")
 
-def getLastDeployed():
-    file = open("LASTDEPLOYED", "r")
+def getLastDeployed(fileName):
+    file = open(fileName, "r")
     content = file.read()
     lastDeployed = int(content)
     file.close()
     return lastDeployed
 
-def updateLastDeployed(buildNumber):
-    file = open("LASTDEPLOYED", "w")
+def updateLastDeployed(fileName, buildNumber):
+    file = open(fileName, "w")
     file.write(str(buildNumber))
     file.close()
 
@@ -221,6 +247,13 @@ def checkout(jobname, play_app_git, buildRevision):
     if (s != 0):
         print "\t ~ Error: Git checkout of " + str(buildRevision) + " failed"
         sys.exit(5)
+    os.chdir(previous)
+
+def publish(jobname, play_path, play_app_path):
+    previous = os.getcwd()
+    os.chdir(jobname)
+    os.chdir(play_app_path)
+    s = subprocess.call(play_path + ' clean compile publish-local', shell=True)
     os.chdir(previous)
 
 def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file):
