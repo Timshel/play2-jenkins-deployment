@@ -63,7 +63,7 @@ def main():
     #Loop until interruption or kill signals
     while True:
 
-        need = needDeployment()
+        need = needDeployment(server, jobname, user, token)
 
         if (need.value):
             print ""
@@ -74,8 +74,8 @@ def main():
             previous = os.getcwd()
             os.chdir(env)
 
-            checkout(need.revision)
-            deploy()
+            checkout(jobname, play_app_git, need.revision)
+            deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file)
 
             #go back in our current directory
             os.chdir(previous)
@@ -93,7 +93,7 @@ def main():
             print ""
             print "\t ~ Start of alreday checked out application start "
             print ""
-            deploy()
+            deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file)
             print ""
             print "\t ~ has been successfuly deployed !"
             print ""
@@ -104,13 +104,13 @@ def main():
         time.sleep(int(poll_delay));
 
 
-def needDeployment():
+def needDeployment(server, jobname, user, token):
 
     result = collections.namedtuple('value', ['revision', 'number'])
     result.value = False
 
     try:
-        jsonBuildStatus = getBuildStatus()
+        jsonBuildStatus = getBuildStatus(server, jobname, user, token)
         buildNumber = getBuildNumber(jsonBuildStatus)
         buildRevision = getBuildRevision(jsonBuildStatus)
         lastDeployed = getLastDeployed()
@@ -166,7 +166,7 @@ def quit(signum, frame):
 
     sys.exit(0)
 
-def getBuildStatus():
+def getBuildStatus(server, jobname, user, token):
     jenkinsStream = connect(server, jobname, user, token)
     return json.load(jenkinsStream)
 
@@ -208,7 +208,7 @@ def updateLastDeployed(buildNumber):
     file.write(str(buildNumber))
     file.close()
 
-def checkout(buildRevision):
+def checkout(jobname, play_app_git, buildRevision):
     if not os.path.exists(jobname):
         s = subprocess.call('git clone ' + play_app_git + ' ' + jobname, shell=True)
         if (s != 0):
@@ -223,7 +223,7 @@ def checkout(buildRevision):
         sys.exit(5)
     os.chdir(previous)
 
-def deploy():
+def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file):
     global process
     previous = os.getcwd()
     os.chdir(jobname)
