@@ -36,17 +36,6 @@ play_path = parser.get('play', 'path')
 
 play_app_git = parser.get('application', 'git')
 play_app_path = parser.get('application', 'path')
-play_app_port = parser.get('application', 'port')
-play_app_apply_evolutions = parser.get('application', 'apply_evolutions')
-play_app_conf_file = parser.get('application', 'conf_file')
-
-play_app_logger = False
-play_app_logger_file = ""
-
-if (parser.has_option('application', 'logger_file')):
-    play_app_logger = True
-    play_app_logger_file = parser.get('application', 'logger_file')
-
 
 env = parser.get('application', 'env')
 
@@ -84,22 +73,6 @@ def main():
             print ""
             print "\t ~  " + str(need.revision) + " has been successfuly deployed !"
             print ""
-
-        elif not(isRunning()):
-            #go in the work directory
-            previous = os.getcwd()
-            os.chdir(env)
-
-            print ""
-            print "\t ~ Start of alreday checked out application start "
-            print ""
-            deploy()
-            print ""
-            print "\t ~ has been successfuly deployed !"
-            print ""
-
-            #go back in our current directory
-            os.chdir(previous)
 
         time.sleep(int(poll_delay));
 
@@ -140,25 +113,7 @@ def checkedout():
     p3 = os.path.join(p2, play_app_path)
     return os.path.isdir(p3)
 
-def isRunning():
-    #go in the work directory
-    previous = os.getcwd()
-    os.chdir(env)
-    os.chdir(jobname)
-    os.chdir(play_app_path)
-
-    run = pidFile() and pidAlive(runningPid())
-
-    #go back in our current directory
-    os.chdir(previous)
-    return run
-
 def quit(signum, frame):
-    global process
-    # we kill the serv when quitting.
-    if 'process' in globals():
-        os.killpg(process.pid, signal.SIGTERM)
-
     # when we quit we set back the last deployed to 0
     # this allow us to restart gracefully
     updateLastDeployed(0)
@@ -228,56 +183,7 @@ def deploy():
     previous = os.getcwd()
     os.chdir(jobname)
     os.chdir(play_app_path)
-    s = subprocess.call(play_path + ' clean compile stage', shell=True)
-    if (s == 0):
-        # default strategy, kill and restart, is very basic and will result in downtime
-        # we could do far better with haproxy
-        # and 2 servers to have zero downtime
-        try:
-            pid = runningPid()
-            if pidAlive(pid):
-                os.kill(pid, signal.SIGTERM)
-                #leave 3 seconds to terminate properly
-                time.sleep(3)
-                os.kill(pid, signal.SIGKILL)
-            else:
-                # No running instance to term or kill
-                if (pidFile()):
-                    # we need to remove the file if there is one, otherwise play will not start
-                    deletePidFile()
-        except IOError as e:
-            # No PID file found, no need to worry
-            pass
-
-        cmd = 'target/start -DapplyEvolutions.default=' + play_app_apply_evolutions + ' -Dconfig.file=' + play_app_conf_file +  ' -Dhttp.port='+play_app_port
-        if (play_app_logger):
-            cmd = cmd + ' -Dlogger.resource=' + play_app_logger_file
-        process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
-    else:
-        # This should never happen as we retrieve only green builds
-        print '\t ~ Error: Compilation failed !'
-        sys.exit(6)
+    s = subprocess.call(play_path + ' clean compile publish-local', shell=True)
     os.chdir(previous)
-
-def runningPid():
-    file = open("RUNNING_PID", "r")
-    content = file.read()
-    pid = int(content)
-    file.close()
-    return pid
-
-def pidAlive(pid):
-    try:
-        os.kill(pid, 0)
-    except OSError, err:
-        if err.errno == errno.ESRCH:
-            return False
-    return True
-
-def pidFile():
-    return os.path.isfile("RUNNING_PID")
-
-def deletePidFile():
-    os.remove("RUNNING_PID")
 
 main()
