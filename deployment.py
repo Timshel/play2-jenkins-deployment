@@ -33,6 +33,8 @@ token = parser.get('jenkins', 'token')
 poll_delay = parser.get('jenkins', 'poll_delay')
 
 play_path = parser.get('play', 'path')
+play_compile_opts = parser.get('play', 'compile.java_opts')
+play_run_opts = parser.get('play', 'run.java_opts')
 
 play_app_git = parser.get('application', 'git')
 play_app_path = parser.get('application', 'path')
@@ -228,7 +230,7 @@ def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_ap
     previous = os.getcwd()
     os.chdir(jobname)
     os.chdir(play_app_path)
-    s = subprocess.call(play_path + ' clean compile stage', shell=True)
+    s = subprocess.call('JAVA_OPTS="{0}" {1} clean compile stage'.format(play_compile_opts, play_path), shell=True)
     if (s == 0):
         # default strategy, kill and restart, is very basic and will result in downtime
         # we could do far better with haproxy
@@ -249,9 +251,9 @@ def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_ap
             # No PID file found, no need to worry
             pass
 
-        cmd = 'target/start -DapplyEvolutions.default=' + play_app_apply_evolutions + ' -Dconfig.file=' + play_app_conf_file +  ' -Dhttp.port='+play_app_port
+        cmd = 'target/start {0} -DapplyEvolutions.default={1} -Dconfig.file={2} -Dhttp.port={3}'.format(play_run_opts, play_app_apply_evolutions, play_app_conf_file, play_app_port)
         if (play_app_logger):
-            cmd = cmd + ' -Dlogger.resource=' + play_app_logger_file
+            cmd = '{0} -Dlogger.resource={1}'.format(cmd, play_app_logger_file)
         process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
     else:
         # This should never happen as we retrieve only green builds
