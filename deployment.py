@@ -10,10 +10,9 @@
 #  2 - Connection failed to Jenkins server
 #  3 - JSON parsing failed
 #  4 - JSON does not contain expected datas
-#  5 - Git clone or checkout failed
-#  6 - Compilation of play2 application failed
+#  5 - Preparation of the artifact failed
 
-import sys, os, signal, errno, subprocess, os.path
+import sys, os, signal, errno, subprocess, os.path, shutil
 import time
 import urllib2, json
 from ConfigParser import SafeConfigParser
@@ -29,26 +28,24 @@ server = parser.get('jenkins', 'server')
 jobname = parser.get('jenkins', 'jobname')
 user = parser.get('jenkins',  'user')
 token = parser.get('jenkins', 'token')
-
 poll_delay = parser.get('jenkins', 'poll_delay')
 
-play_path = parser.get('play', 'path')
+path_env = os.path.abspath(parser.get('environement', 'path_env'))
+path_running = os.path.join(path_env, parser.get('environement', 'path_running'))
+path_building = os.path.join(path_env, parser.get('environement', 'path_building'))
 
-play_app_git = parser.get('application', 'git')
-play_app_path = parser.get('application', 'path')
-play_app_port = parser.get('application', 'port')
-play_app_apply_evolutions = parser.get('application', 'apply_evolutions')
-play_app_conf_file = parser.get('application', 'conf_file')
+app_opts = parser.get('application', 'java_opts')
+app_port = parser.get('application', 'port')
+app_apply_evolutions = parser.get('application', 'apply_evolutions')
+app_conf_resource = ( parser.get('application', 'conf_resource') == "true" )
+app_conf_file = parser.get('application', 'conf_file')
 
-play_app_logger = False
-play_app_logger_file = ""
+app_logger = parser.has_option('application', 'logger_file')
 
-if (parser.has_option('application', 'logger_file')):
-    play_app_logger = True
-    play_app_logger_file = parser.get('application', 'logger_file')
-
-
-env = parser.get('application', 'env')
+if( app_logger ):
+    app_logger_file = parser.get('application', 'logger_file')
+else:
+    app_logger_file = ""
 
 def main():
 
@@ -70,43 +67,30 @@ def main():
             print "\t ~ Deployment of " + str(need.revision) + " ( Build " + str(need.number) + " ) "  + "start "
             print ""
 
-            #go in the work directory
-            previous = os.getcwd()
-            os.chdir(env)
-
-            checkout(jobname, play_app_git, need.revision)
-            deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file)
-
-            #go back in our current directory
-            os.chdir(previous)
+            downloadArtifact(server, jobname, user, token, need.artifact)
+            prepare("lastBuild.zip")
+            deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
 
             updateLastDeployed(need.number)
             print ""
             print "\t ~  " + str(need.revision) + " has been successfuly deployed !"
             print ""
 
-        elif not(isRunning()):
-            #go in the work directory
-            previous = os.getcwd()
-            os.chdir(env)
-
+        elif not(isRunning("running")):
             print ""
             print "\t ~ Start of alreday checked out application start "
             print ""
-            deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file)
+            deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
             print ""
             print "\t ~ has been successfuly deployed !"
             print ""
-
-            #go back in our current directory
-            os.chdir(previous)
 
         time.sleep(int(poll_delay));
 
 
 def needDeployment(server, jobname, user, token):
 
-    result = collections.namedtuple('value', ['revision', 'number'])
+    result = collections.namedtuple('value', ['revision', 'number', 'artifact'])
     result.value = False
 
     try:
@@ -118,6 +102,7 @@ def needDeployment(server, jobname, user, token):
         result.revision = buildRevision
         result.number = buildNumber
         result.value = lastDeployed < buildNumber
+        result.artifact = getArtifact(jsonBuildStatus)
 
     except (urllib2.HTTPError, urllib2.URLError) as e:
         print "\t ~ Error: Connection failed to  " + server + " with job name " + jobname + " - "
@@ -132,25 +117,8 @@ def needDeployment(server, jobname, user, token):
 
     return result
 
-
-def checkedout():
-    current = os.getcwd()
-    p1 = os.path.join(current, env)
-    p2 = os.path.join(p1, jobname)
-    p3 = os.path.join(p2, play_app_path)
-    return os.path.isdir(p3)
-
-def isRunning():
-    #go in the work directory
-    previous = os.getcwd()
-    os.chdir(env)
-    os.chdir(jobname)
-    os.chdir(play_app_path)
-
+def isRunning(runPath):
     run = pidFile() and pidAlive(runningPid())
-
-    #go back in our current directory
-    os.chdir(previous)
     return run
 
 def quit(signum, frame):
@@ -159,22 +127,32 @@ def quit(signum, frame):
     if 'process' in globals():
         os.killpg(process.pid, signal.SIGTERM)
 
-    # when we quit we set back the last deployed to 0
-    # this allow us to restart gracefully
+    # When we quit we set back the last deployed to 0 this allow us to restart gracefully
     updateLastDeployed(0)
     print "\n\t -- Terminating --"
 
     sys.exit(0)
 
-def getBuildStatus(server, jobname, user, token):
-    jenkinsStream = connect(server, jobname, user, token)
-    return json.load(jenkinsStream)
-
-def connect(server, jobname, user, token):
-    jenkinsUrl = "http://" + server + "/job/" + jobname + "/lastSuccessfulBuild/api/json";
+def connect(jenkinsUrl, user, token):
     req = urllib2.Request(jenkinsUrl)
     req.add_header('Authorization', encodeUserData(user, token))
     return urllib2.urlopen( req )
+
+def getBuildStatus(server, jobname, user, token):
+    jenkinsUrl = "http://{0}/job/{1}/lastSuccessfulBuild/api/json".format(server, jobname)
+    jenkinsStream = connect(jenkinsUrl, user, token)
+    return json.load(jenkinsStream)
+
+def downloadArtifact(server, jobname, user, token, artifact):
+    jenkinsUrl = "http://{0}/job/{1}/lastSuccessfulBuild/artifact/{2}".format(server, jobname, artifact)
+    print "downloading " + jenkinsUrl
+    jenkinsStream = connect(jenkinsUrl, user, token)
+
+    # Open our local file for writing
+    zipPath = os.path.join(path_env, "lastBuild.zip")
+    with open(zipPath, "wb") as local_file:
+        local_file.write(jenkinsStream.read())
+
 
 # simple wrapper function to encode the username & pass
 def encodeUserData(user, token):
@@ -196,6 +174,14 @@ def getBuildRevision(buildStatusJson):
 
     raise Exception("\t ~ Error: Unable to get build revision from JSON")
 
+def getArtifact(buildStatusJson):
+    if buildStatusJson.has_key( "artifacts" ):
+        artifacts = buildStatusJson["artifacts"]
+        if artifacts[0].has_key("relativePath"):
+            return artifacts[0]["relativePath"]
+
+    raise Exception("\t ~ Error: Unable to get artifact from JSON")
+
 def getLastDeployed():
     file = open("LASTDEPLOYED", "r")
     content = file.read()
@@ -208,32 +194,37 @@ def updateLastDeployed(buildNumber):
     file.write(str(buildNumber))
     file.close()
 
-def checkout(jobname, play_app_git, buildRevision):
-    if not os.path.exists(jobname):
-        s = subprocess.call('git clone ' + play_app_git + ' ' + jobname, shell=True)
-        if (s != 0):
-            print "\t ~ Error: Git clone of " + play_app_git + " failed"
-            sys.exit(5)
-    previous = os.getcwd()
-    os.chdir(jobname)
-    subprocess.call('git fetch', shell=True)
-    s = subprocess.call('git checkout -f ' + str(buildRevision), shell=True)
-    if (s != 0):
-        print "\t ~ Error: Git checkout of " + str(buildRevision) + " failed"
-        sys.exit(5)
-    os.chdir(previous)
+def checkReturn(returnCode, exitCode, message):
+    if( returnCode != 0 ):
+        print "\t ~ Error: " + message
+        sys.exit(exitCode)
 
-def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_app_conf_file, play_app_port, play_app_logger, play_app_logger_file):
-    global process
-    previous = os.getcwd()
-    os.chdir(jobname)
-    os.chdir(play_app_path)
-    s = subprocess.call(play_path + ' clean compile stage', shell=True)
-    if (s == 0):
-        # default strategy, kill and restart, is very basic and will result in downtime
-        # we could do far better with haproxy
-        # and 2 servers to have zero downtime
-        try:
+def executeCommand(cmd, exitCode):
+    s = subprocess.call(cmd, shell=True)
+    checkReturn(s, exitCode, cmd)
+
+def prepare(zipName):
+    zipPath = os.path.join(path_env, zipName)
+    if( os.path.isfile(zipPath) ):
+        executeCommand("unzip -o {0} -d {1}".format(zipPath, path_building), 5)
+        subFolderName = os.listdir(path_building)[0]
+        executeCommand("mv {0}/{1}/* {0}".format(path_building, subFolderName), 5)
+        executeCommand("chmod +x {0}/start".format(path_building), 5)
+    else:
+        raise Exception("\t ~ Error: Missing archive : {0}".format(zipPath))
+
+def switch():
+    if( os.path.isdir(path_building) ):
+        shutil.move(path_running, "/tmp/DELETE-{0}".format(jobname))
+        shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
+        shutil.move(path_building, path_running)
+
+# default strategy, kill and restart, is very basic and will result in downtime
+# we could do far better with haproxy
+# and 2 servers to have zero downtime
+def killApp():
+    try:
+        if( pidFile() ):
             pid = runningPid()
             if pidAlive(pid):
                 os.kill(pid, signal.SIGTERM)
@@ -242,25 +233,32 @@ def deploy(jobname, play_path, play_app_path, play_app_apply_evolutions, play_ap
                 os.kill(pid, signal.SIGKILL)
             else:
                 # No running instance to term or kill
-                if (pidFile()):
-                    # we need to remove the file if there is one, otherwise play will not start
-                    deletePidFile()
-        except IOError as e:
-            # No PID file found, no need to worry
-            pass
+                # we need to remove the file if there is one, otherwise play will not start
+                deletePidFile()
+    except IOError as e:
+        # No PID file found, no need to worry
+        pass
 
-        cmd = 'target/start -DapplyEvolutions.default=' + play_app_apply_evolutions + ' -Dconfig.file=' + play_app_conf_file +  ' -Dhttp.port='+play_app_port
-        if (play_app_logger):
-            cmd = cmd + ' -Dlogger.resource=' + play_app_logger_file
-        process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+def deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file):
+    global process
+
+    killApp()
+    switch()
+
+    cmd = "{0}/start -DapplyEvolutions.default={1} -Dhttp.port={2}".format(path_running, app_apply_evolutions, app_port)
+
+    if( app_conf_resource ):
+        cmd = "{0} -Dconfig.resource={1}".format(cmd, app_conf_file)
     else:
-        # This should never happen as we retrieve only green builds
-        print '\t ~ Error: Compilation failed !'
-        sys.exit(6)
-    os.chdir(previous)
+        cmd = "{0} -Dconfig.file={1}".format(cmd, app_conf_file)
+
+    if( app_logger ):
+        cmd = "{0} -Dlogger.resource={1}".format(cmd, app_logger_file)
+
+    process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
 
 def runningPid():
-    file = open("RUNNING_PID", "r")
+    file = open(os.path.join(path_running, "RUNNING_PID"), "r")
     content = file.read()
     pid = int(content)
     file.close()
@@ -275,9 +273,9 @@ def pidAlive(pid):
     return True
 
 def pidFile():
-    return os.path.isfile("RUNNING_PID")
+    return os.path.isfile(os.path.join(path_running, "RUNNING_PID"))
 
 def deletePidFile():
-    os.remove("RUNNING_PID")
+    os.remove(os.path.join(path_running, "RUNNING_PID"))
 
 main()
