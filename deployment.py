@@ -215,8 +215,9 @@ def prepare(zipName):
 
 def switch():
     if( os.path.isdir(path_building) ):
-        shutil.move(path_running, "/tmp/DELETE-{0}".format(jobname))
-        shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
+        if( os.path.isdir(path_running) ):
+            shutil.move(path_running, "/tmp/DELETE-{0}".format(jobname))
+            shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
         shutil.move(path_building, path_running)
 
 # default strategy, kill and restart, is very basic and will result in downtime
