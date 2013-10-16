@@ -203,9 +203,15 @@ def executeCommand(cmd, exitCode):
     s = subprocess.call(cmd, shell=True)
     checkReturn(s, exitCode, cmd)
 
+def checkDeletePath(path):
+    if( os.path.isdir(path) ):
+        shutil.move(path, "/tmp/DELETE-{0}".format(jobname))
+        shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
+
 def prepare(zipName):
     zipPath = os.path.join(path_env, zipName)
     if( os.path.isfile(zipPath) ):
+        checkDeletePath(path_building)
         executeCommand("unzip -o {0} -d {1}".format(zipPath, path_building), 5)
         subFolderName = os.listdir(path_building)[0]
         executeCommand("mv {0}/{1}/* {0}".format(path_building, subFolderName), 5)
@@ -215,9 +221,7 @@ def prepare(zipName):
 
 def switch():
     if( os.path.isdir(path_building) ):
-        if( os.path.isdir(path_running) ):
-            shutil.move(path_running, "/tmp/DELETE-{0}".format(jobname))
-            shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
+        checkDeletePath(path_running)
         shutil.move(path_building, path_running)
 
 # default strategy, kill and restart, is very basic and will result in downtime
