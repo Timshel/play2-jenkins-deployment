@@ -235,7 +235,8 @@ def killApp():
                 os.kill(pid, signal.SIGTERM)
                 #leave 3 seconds to terminate properly
                 time.sleep(3)
-                os.kill(pid, signal.SIGKILL)
+                if pidAlive(pid):
+                    os.kill(pid, signal.SIGKILL)
             else:
                 # No running instance to term or kill
                 # we need to remove the file if there is one, otherwise play will not start
