@@ -34,6 +34,7 @@ path_env = os.path.abspath(parser.get('environement', 'path_env'))
 path_running = os.path.join(path_env, parser.get('environement', 'path_running'))
 path_building = os.path.join(path_env, parser.get('environement', 'path_building'))
 
+app_name = parser.get('application', 'app_name')
 app_opts = parser.get('application', 'java_opts')
 app_port = parser.get('application', 'port')
 app_apply_evolutions = parser.get('application', 'apply_evolutions')
@@ -215,7 +216,7 @@ def prepare(zipName):
         executeCommand("unzip -o {0} -d {1}".format(zipPath, path_building), 5)
         subFolderName = os.listdir(path_building)[0]
         executeCommand("mv {0}/{1}/* {0}".format(path_building, subFolderName), 5)
-        executeCommand("chmod +x {0}/start".format(path_building), 5)
+        executeCommand("chmod +x {0}/bin/{1}".format(path_building, app_name), 5)
     else:
         raise Exception("\t ~ Error: Missing archive : {0}".format(zipPath))
 
@@ -251,7 +252,7 @@ def deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app
     killApp()
     switch()
 
-    cmd = "{0}/start -DapplyEvolutions.default={1} -Dhttp.port={2}".format(path_running, app_apply_evolutions, app_port)
+    cmd = "{0}/bin/{1} -DapplyEvolutions.default={2} -Dhttp.port={3}".format(path_running, app_name, app_apply_evolutions, app_port)
 
     if( app_conf_resource ):
         cmd = "{0} -Dconfig.resource={1}".format(cmd, app_conf_file)
