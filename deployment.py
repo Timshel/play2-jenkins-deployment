@@ -69,8 +69,8 @@ def main():
             print ""
 
             downloadArtifact(server, jobname, user, token, need.artifact)
-            prepare("lastBuild.zip")
-            deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
+            prepare("lastBuild.zip", app_name)
+            deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
 
             updateLastDeployed(need.number)
             print ""
@@ -81,7 +81,7 @@ def main():
             print ""
             print "\t ~ Start of alreday checked out application start "
             print ""
-            deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
+            deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
             print ""
             print "\t ~ has been successfuly deployed !"
             print ""
@@ -208,7 +208,7 @@ def checkDeletePath(path):
         shutil.move(path, "/tmp/DELETE-{0}".format(jobname))
         shutil.rmtree("/tmp/DELETE-{0}".format(jobname))
 
-def prepare(zipName):
+def prepare(zipName, app_name):
     zipPath = os.path.join(path_env, zipName)
     if( os.path.isfile(zipPath) ):
         checkDeletePath(path_building)
@@ -245,13 +245,13 @@ def killApp():
         # No PID file found, no need to worry
         pass
 
-def deploy(app_apply_evolutions, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file):
+def deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file):
     global process
 
     killApp()
     switch()
 
-    cmd = "{0}/bin/{1} -DapplyEvolutions.default={2} -Dhttp.port={3}".format(path_running, app_name, app_apply_evolutions, app_port)
+    cmd = 'JAVA_OPTS="{0}" {1}/bin/{2} -DapplyEvolutions.default={3} -Dhttp.port={4}'.format(app_opts, path_running, app_name, app_apply_evolutions, app_port)
 
     if( app_conf_resource ):
         cmd = "{0} -Dconfig.resource={1}".format(cmd, app_conf_file)
