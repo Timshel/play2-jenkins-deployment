@@ -260,8 +260,8 @@ def deploy(need, app_apply_evolutions, app_name, app_opts, app_port, app_conf_re
 
     env = os.environ.copy()
     env["JAVA_OPTS"] = app_opts
-    env["BUILD_NUMBER"] = need.number
-    env["BUILD_TIMESTAMP"] = need.timestamp
+    env["BUILD_NUMBER"] = str(need.number)
+    env["BUILD_TIMESTAMP"] = str(need.timestamp)
 
     cmd = '{0}/bin/{1} -DapplyEvolutions.default={2} -Dhttp.port={3}'.format(path_running, app_name, app_apply_evolutions, app_port)
 
