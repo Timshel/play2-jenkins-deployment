@@ -70,7 +70,7 @@ def main():
 
             downloadArtifact(server, jobname, user, token, need.artifact)
             prepare("lastBuild.zip", app_name)
-            deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
+            deploy(need, app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
 
             updateLastDeployed(need.number)
             print ""
@@ -81,7 +81,7 @@ def main():
             print ""
             print "\t ~ Start of alreday checked out application start "
             print ""
-            deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
+            deploy(need, app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file)
             print ""
             print "\t ~ has been successfuly deployed !"
             print ""
@@ -91,19 +91,20 @@ def main():
 
 def needDeployment(server, jobname, user, token):
 
-    result = collections.namedtuple('value', ['revision', 'number', 'artifact'])
+    result = collections.namedtuple('value', ['revision', 'number', 'timestamp', 'artifact'])
     result.value = False
 
     try:
         jsonBuildStatus = getBuildStatus(server, jobname, user, token)
-        buildNumber = getBuildNumber(jsonBuildStatus)
-        buildRevision = getBuildRevision(jsonBuildStatus)
-        lastDeployed = getLastDeployed()
+        buildNumber     = getBuildNumber(jsonBuildStatus)
+        buildRevision   = getBuildRevision(jsonBuildStatus)
+        lastDeployed    = getLastDeployed()
 
-        result.revision = buildRevision
-        result.number = buildNumber
-        result.value = lastDeployed < buildNumber
-        result.artifact = getArtifact(jsonBuildStatus)
+        result.revision  = buildRevision
+        result.number    = buildNumber
+        result.timestamp = getBuildTimestamp(jsonBuildStatus)
+        result.value     = lastDeployed < buildNumber
+        result.artifact  = getArtifact(jsonBuildStatus)
 
     except (urllib2.HTTPError, urllib2.URLError) as e:
         print "\t ~ Error: Connection failed to  " + server + " with job name " + jobname + " - "
@@ -164,6 +165,12 @@ def getBuildNumber(buildStatusJson):
         return buildStatusJson["number"]
     else:
         raise Exception("\t ~ Error: Unable to get build number from JSON")
+
+def getBuildTimestamp(buildStatusJson):
+    if buildStatusJson.has_key( "timestamp" ):
+        return buildStatusJson["timestamp"]
+    else:
+        raise Exception("\t ~ Error: Unable to get build timestamp from JSON")
 
 def getBuildRevision(buildStatusJson):
     if buildStatusJson.has_key( "actions" ):
@@ -245,13 +252,18 @@ def killApp():
         # No PID file found, no need to worry
         pass
 
-def deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file):
+def deploy(need, app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource, app_conf_file, app_logger, app_logger_file):
     global process
 
     killApp()
     switch()
 
-    cmd = 'JAVA_OPTS="{0}" {1}/bin/{2} -DapplyEvolutions.default={3} -Dhttp.port={4}'.format(app_opts, path_running, app_name, app_apply_evolutions, app_port)
+    env = os.environ.copy()
+    env["JAVA_OPTS"] = app_opts
+    env["BUILD_NUMBER"] = need.number
+    env["BUILD_TIMESTAMP"] = need.timestamp
+
+    cmd = '{0}/bin/{1} -DapplyEvolutions.default={2} -Dhttp.port={3}'.format(path_running, app_name, app_apply_evolutions, app_port)
 
     if( app_conf_resource ):
         cmd = "{0} -Dconfig.resource={1}".format(cmd, app_conf_file)
@@ -261,7 +273,7 @@ def deploy(app_apply_evolutions, app_name, app_opts, app_port, app_conf_resource
     if( app_logger ):
         cmd = "{0} -Dlogger.resource={1}".format(cmd, app_logger_file)
 
-    process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+    process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid, env=env)
 
 def runningPid():
     file = open(os.path.join(path_running, "RUNNING_PID"), "r")
