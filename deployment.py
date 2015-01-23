@@ -168,10 +168,9 @@ def getBuildNumber(buildStatusJson):
 def getBuildRevision(buildStatusJson):
     if buildStatusJson.has_key( "actions" ):
         actions = buildStatusJson["actions"]
-        if actions[1].has_key("lastBuiltRevision"):
-            return actions[1]["lastBuiltRevision"]["SHA1"]
-        elif  actions[2].has_key("lastBuiltRevision"):
-            return actions[2]["lastBuiltRevision"]["SHA1"]
+        for action in actions:
+            if action.has_key("lastBuiltRevision"):
+                return action["lastBuiltRevision"]["SHA1"]
 
     raise Exception("\t ~ Error: Unable to get build revision from JSON")
 
